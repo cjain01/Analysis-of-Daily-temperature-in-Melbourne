@@ -1,0 +1,172 @@
+---
+title: "Analysis of Temperature in Melbourne"
+author: 'Chetali Jain'
+date: "3/19/2022"
+output:
+  pdf_document:
+   citation_package: natbib
+   latex_engine: xelatex
+   extra_dependencies: "subfig"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, comment = NA, 
+                      include = TRUE, warning = FALSE)
+```
+
+```{r loading libraries, include=FALSE}
+library(dplyr)
+library(timeDate)
+library(TSstudio)
+library(ggplot2)
+library(xts)
+library(forecast)
+library(kableExtra)
+library(tseries)
+library(hwwntest)
+library(astsa)
+library(Metrics)
+library(qpcR)
+```
+
+```{r citation}
+knitr::write_bib(c("hwwntest", "astsa","Box.test"), width = 60)
+```
+
+```{r loading data, include=FALSE}
+setwd("C:/Users/rahul/Desktop/Time Series/Project")
+temp.data <- read.csv("TempMelbPRO.csv")
+temp.data$Date <- as.Date(temp.data$Date,
+                                 format = "%d/%m/%Y")
+names(temp.data)[names(temp.data) == 'Daily.maximum.temperatures.in.Melbourne..Australia..1981.1990'] <- "Max.Temp"
+data_ts <- ts(temp.data[,2], frequency = 365, start = c(1981,1))
+```
+
+```{r initaial table}
+x <- filter(temp.data,temp.data$Max.Temp == min(temp.data$Max.Temp))
+y <- filter(temp.data,temp.data$Max.Temp == max(temp.data$Max.Temp))
+
+tab <- rbind.data.frame(x,y)
+row.names(tab) <- c("Min Temperature","Max Temperature")
+colnames(tab)[colnames(tab) == "Max.Temp"] <- "Temperature"
+kbl(tab, caption = "Temerature Summary Statistics",
+    format.args=c(floating = FALSE))%>%
+  kable_styling("bordered",latex_options = c("hold_position"))
+```
+
+```{r ts graph,fig.cap='1', fig.show="hold"}
+
+ts.plot(data_ts,type = "l", col = c("red"),
+     ylab='Temperature', xlab='Time',
+     main = "Time Series plot of Maximum Temperature in Melbourne.")
+
+```
+
+```{r decompose daily data,fig.cap='2', fig.show="hold"}
+dec_temp_daily <- decompose(data_ts)
+plot(dec_temp_daily)
+```
+
+```{r check stat}
+x <- ts(temp.data[,2],start = c(1981,1),frequency = 365)
+adf.test(x)
+```
+
+```{r white noise test}
+bartlettB.test(temp.data$Max.Temp)
+```
+
+```{r monthly data, fig.cap='3', fig.show="hold"}
+ts_xts <- xts(temp.data$Max.Temp,temp.data$Date)
+ts_m <- ts(apply.monthly(ts_xts,mean), 
+                start = 1981, frequency = 12)
+ts.plot(ts_m, type = "l", 
+     xlab="Year", ylab="Monthly Temperature", 
+     main = "Monthly Maximum Temperature in Melbourne")
+```
+
+```{r decomose}
+dec_temp <- decompose(ts_m)
+plot(dec_temp)
+```
+
+```{r monthly avg,fig.cap='4', fig.show="hold"}
+mon_avg <- tapply(ts_m,cycle(ts_m),mean)
+plot(mon_avg, type = "b", 
+     main = "Monthly Average of Maximum Temperature from\n 1980-1991 in Melbourne",
+     xlab = "Month",ylab = "Average Temperature",
+     xaxt ="n")
+axis(1, at=seq(2,12,2), labels=month.abb[seq(2,12,2)])
+```
+
+```{r train test split}
+split_ts <- ts_split(ts.obj = ts_m, sample.out = 12)
+
+training <- split_ts$train
+testing <- split_ts$test
+ts.plot(tapply(training,cycle(training),mean),type = "b",ylab = "temp")
+class(testing)
+```
+
+```{r training acf and pcaf}
+acf(training, main = "Partial ACF Plot for the Training Dataset",
+    type = "partial")
+acf(training, main = "Partial ACF Plot for the Training Dataset")
+```
+
+```{r diff and stationary}
+dif_train <- diff(training,lag=frequency(training), differences=1)  
+plot(dif_train, type="l", main="Time series plot for \nSeasonally Differenced\n",ylab = "Series")
+acf(dif_train)
+acf(dif_train, type = "partial")
+Box.test(dif_train)
+```
+
+```{r model fitting}
+arima_model_diff <- auto.arima(dif_train, trace = TRUE, stationary = TRUE)
+ar_tr <- auto.arima(training,trace = TRUE)
+summary(ar_tr)
+x <- sarima(training, p = 0, d= 0, q = 0, P = 2, D = 1, Q = 0, S = 12)
+```
+
+```{r forecasting}
+fore_arima = forecast::forecast(ar_tr, h=12)
+summary(fore_arima)
+sar_for <- sarima.for(training, 12, p = 0, d= 0, q = 0, P = 2, D = 1, Q = 0, S = 12,main = "Forecasted Temperature for year 1990")
+```
+
+```{r errors}
+mae(testing,sar_for$pred)
+rmse(testing,sar_for$pred)
+mse(testing,sar_for$pred)
+sum((sar_for$pred - testing)^2)
+```
+
+```{r shipro wilko}
+shapiro.test(testing)
+shapiro.test(sar_for$pred)
+```
+
+```{r f test}
+var.test(sar_for$pred,testing)
+```
+
+```{r t test}
+t.test(testing,sar_for$pred)
+```
+
+```{r actual vs pred}
+x <- c(1990.0,1990.2,1990.4,1990.6,1990.8)
+plot(sar_for$pred,type = "b",col = "dark red",
+     xlab = "Months",ylab = "Temperature",
+     main = "Actual v.s. Forecasted Temperature \n for year 1990\n",
+     xaxt = "n")
+points(testing,pch = 8)
+axis(1, at=x, labels=month.abb[seq(1,10,2)])
+legend(1,18,c("Actual","Predicted"),lty = c(1,0),pch = c(1,8), col = c("dark red", "black"))
+
+```
+
+
+
+
